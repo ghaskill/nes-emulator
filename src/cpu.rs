@@ -27,7 +27,7 @@ bitflags! {
 }
 
 const STACK: u16 = 0x0100;
-const STACK_RESET: u8 = 0xff;
+const STACK_RESET: u8 = 0xfd;
 
 pub struct CPU {
     pub register_a: u8,
@@ -54,7 +54,7 @@ pub enum AddressingMode {
     NoneAddressing,
 }
 
-trait Mem {
+pub trait Mem {
     fn mem_read(&self, addr: u16) -> u8; 
 
     fn mem_write(&mut self, addr: u16, data: u8);
@@ -607,8 +607,8 @@ impl CPU {
     }
 
     pub fn load(&mut self, program: Vec<u8>) {
-        self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
-        self.mem_write_u16(0xFFFC, 0x8000);
+        self.memory[0x0600 .. (0x0600 + program.len())].copy_from_slice(&program[..]);
+        self.mem_write_u16(0xFFFC, 0x0600);
     }
 
     pub fn reset(&mut self) {
@@ -621,308 +621,326 @@ impl CPU {
     }
 
     pub fn run(&mut self) {
+        self.run_with_callback(|_| {});
+    }
+
+    pub fn run_with_callback<F>(&mut self, mut callback: F)
+    where 
+        F: FnMut(&mut CPU),
+    {
+       //let mut i = 1;
         let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
 
         loop {
+
+            //println!("{i}");
+            //i +=1;
             let code = self.mem_read(self.program_counter);
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
 
             let opcode = opcodes.get(&code).expect(&format!("OpCode {:x} is not recognized", code));
-
+            //println!("{}", code);
             match code {
                 /* CLC */
                 0x18 => {
                     self.status.remove(CpuFlags::CARRY);
-                }
+                },
 
                 /* CLD */
                 0xd8 => {
                     self.status.remove(CpuFlags::DECIMAL_MODE);
-                }
+                },
 
                 /* CLI */ 
                 0x58 => {
                     self.status.remove(CpuFlags::INTERRUPT_DISABLE);
-                }
+                },
 
                 /* CLV */ 
                 0xb8 => {
                     self.status.remove(CpuFlags::OVERFLOW);
-                }
+                },
 
                 /* PHA */
                 0x48 => {
                     self.stack_push(self.register_a);
-                }
+                },
 
                 /* ADC */
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
                     self.adc(&opcode.mode);
-                }
+                },
 
                 /* AND */
                 0x29 | 0x25 | 0x35 | 0x2d | 0x3d | 0x39 | 0x21 | 0x31 => {
                     self.and(&opcode.mode);
-                }
+                },
 
                 /* ASL */
                 0x0a => {
                     self.asl_accumulator();
-                }
+                },
 
                 0x06 | 0x16 | 0x0e | 0x1e => {
                     self.asl(&opcode.mode);
-                }
+                },
 
                 /* BCC */
                 0x90 => {
                     self.branch(!self.status.contains(CpuFlags::CARRY));
-                }
+                },
 
                 /* BCS */
                 0xb0 => {
                     self.branch(self.status.contains(CpuFlags::CARRY));
-                }
+                },
 
                 /* BCE */
                 0xf0 => {
                     self.branch(self.status.contains(CpuFlags::ZERO));
-                }
+                },
 
                 /* BIT */
                 0x24 | 0x2c => {
                     self.bit(&opcode.mode);
-                }
+                },
 
                 /* BMI */
                 0x30 => {
                     self.branch(self.status.contains(CpuFlags::NEGATIVE));
-                }
+                },
 
                 /* BNE */
                 0xd0 => {
                     self.branch(!self.status.contains(CpuFlags::ZERO));
-                }
+                },
 
                 /* BPL */
                 0x10 => {
                     self.branch(!self.status.contains(CpuFlags::NEGATIVE));
-                }
+                },
 
                 /* BVC */
                 0x50 => {
                     self.branch(!self.status.contains(CpuFlags::OVERFLOW));
-                }
+                },
 
                 /* BVS */
                 0x70 => {
                     self.branch(self.status.contains(CpuFlags::OVERFLOW));
-                }
+                },
                 /* CMP */
                 0xc9 | 0xc5 | 0xd5 | 0xcd | 0xdd | 0xd9 | 0xc1 | 0xd1 => {
                     self.compare(&opcode.mode, self.register_a);
-                }
+                },
 
                 /* CPX */
                 0xe0 | 0xe4 | 0xec => {
                     self.compare(&opcode.mode, self.register_x);
-                }
+                },
 
                 /* CPY */
                 0xc0 | 0xc4 | 0xcc => {
                     self.compare(&opcode.mode, self.register_y);
-                }
+                },
 
                 /* DEC */
                 0xc6 | 0xd6 | 0xce | 0xde => {
                     self.dec(&opcode.mode);
-                }
+                },
 
                 /* DEX */ 
                 0xca => {
                     self.dex();
-                }
+                },
 
                 /* DEY */
                 0x88 => {
                     self.dey();
-                }
+                },
 
                 /* EOR */
                 0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => {
                     self.eor(&opcode.mode);
-                }
+                },
 
                 /* INC */
                 0xe6 | 0xf6 | 0xee | 0xfe => {
                     self.inc(&opcode.mode);
-                }
+                },
 
                 /* INX */
                 0xe8 => {
                     self.inx();
-                }
+                },
 
                 /* INY */
                 0xc8 => {
                     self.iny();
-                }
+                },
 
                 /* JMP */
                 0x4c => {
                     self.jmp_absolute();
-                }
+                },
                 0x6c => {self.jump_indirect();
-                }
+                },
                 
                 /* JSR */
                 0x20 => {
                     self.jsr();
-                }
+                },
 
                 /* LDA */
                 0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => {
                     self.lda(&opcode.mode);
-                }
+                },
 
                 /* LDX */
                 0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => {
                     self.ldx(&opcode.mode);
-                }
+                },
 
                 /* LDY */
                 0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => {
                     self.ldy(&opcode.mode);
-                }
+                },
 
                 /* LSR */
                 0x4a => {
                     self.lsr_accumulator();
-                }
+                },
                 0x46 | 0x56 | 0x4e | 0x5e => {
                     self.lsr(&opcode.mode);
-                }
+                },
+
+                /* NOP */
+                0xea => {
+                    // do nothing
+                },
 
                 /* ORA */
                 0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => {
                     self.ora(&opcode.mode);
-                }
+                },
 
                 /* PHP */
                 0x08 => {
                     self.php();
-                }
+                },
 
                 /* PLA */
                 0x68 => {
                     self.pla();
-                }
+                },
 
                 /* PLP */
                 0x28 => {
                     self.plp();
-                }
+                },
 
                 /* ROL */
                 0x2a => {
                     self.rol_accumulator();
-                }
+                },
                 0x26 | 0x36 | 0x2e | 0x3e => {
                     self.rol(&opcode.mode);
-                }
+                },
 
                 /* ROR */
                 0x6a => {
                     self.ror_accumulator();
-                }
+                },
                 0x66 | 0x76 | 0x6e | 0x7e => {
                     self.ror(&opcode.mode);
-                }
+                },
 
                 /* RTI */
                 0x40 => {
                     self.rti();
-                }
+                },
 
                 /* RTS */
                 0x60 => {
                     self.rts();
-                }
+                },
 
                 /* SBC */
                 0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
                     self.sbc(&opcode.mode);
-                }
+                },
 
                 /* SEC */
                 0x38 => {
                     self.set_carry_flag();
-                }
+                },
 
                 /* SED */
                 0xf8 => {
                     self.status.insert(CpuFlags::DECIMAL_MODE);
-                }
+                },
 
                 /* SEI */
                 0x78 => {
                     self.status.insert(CpuFlags::INTERRUPT_DISABLE);
-                }
+                },
 
                 /* STA */
                 0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
                     self.sta(&opcode.mode);
-                }
+                },
 
                 /* STX */
                 0x86 | 0x96 | 0x8e => {
                     self.stx(&opcode.mode);
-                }
+                },
 
                 /* STY */
                 0x84 | 0x94 | 0x8c => {
                     self.sty(&opcode.mode);
-                }
+                },
 
                 /* TXA */
                 0x8a => {
                     self.txa();
-                }
+                },
 
                 /* TAX */
                 0xAA => {
                     self.tax();
-                }
+                },
 
                 /* TAY */
                 0xa8 => {
                     self.tay();
-                }
+                },
 
                 /* TSX */
                 0xba => {
                     self.tsx();
-                }
+                },
 
                 /* TXS */
                 0x9a => {
                     self.txs();
-                }
+                },
 
                 /* TYA */
                 0x98 => {
                     self.tya();
-                }
+                },
 
                 0x00 => return,
 
-                _ => unreachable!(),
+                _ => todo!(),
             }
 
             if program_counter_state == self.program_counter {
                 self.program_counter += (opcode.len - 1) as u16;
             }
+
+            callback(self);
         }
     }
 }
