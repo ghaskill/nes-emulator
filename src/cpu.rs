@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use crate::opcodes;
+use crate::bus::Bus;
 
 bitflags! {
     /// # Status Register (P) http://wiki.nesdev.com/w/index.php/Status_flags
@@ -88,14 +89,14 @@ impl Mem for CPU {
         self.bus.mem_read_u16(pos)
     }
 
-    fn mem_write_u16(&mut self, pos: u16, data: u8) {
+    fn mem_write_u16(&mut self, pos: u16, data: u16) {
         self.bus.mem_write_u16(pos, data);
     }
     
 }
 
 impl CPU {
-    pub fn new() -> Self {
+    pub fn new(bus: Bus) -> Self {
         CPU {
             register_a: 0,
             register_x: 0,
@@ -103,7 +104,7 @@ impl CPU {
             status: CpuFlags::from_bits_truncate(0b100100),
             program_counter: 0,
             stack_pointer: STACK_RESET,
-            bus: Bus::new(),
+            bus: bus,
             // memory: [0; 0xFFFF]
         }
     }
@@ -246,7 +247,8 @@ impl CPU {
         self.set_register_a(result);
     }
 
-    /* OPCODES (alphabetical order) */
+    // OPCODES (alphabetical order)
+    // https://www.nesdev.org/obelisk-6502-guide/reference.html
 
     fn adc(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(&mode);
@@ -618,7 +620,9 @@ impl CPU {
     }
 
     pub fn load(&mut self, program: Vec<u8>) {
-        self.memory[0x0600 .. (0x0600 + program.len())].copy_from_slice(&program[..]);
+        for i in 0..(program.len() as u16) {
+            self.mem_write(0x0600 + i, program[i as usize]);
+        }
         self.mem_write_u16(0xFFFC, 0x0600);
     }
 
@@ -955,7 +959,7 @@ impl CPU {
         }
     }
 }
-
+/*
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1016,4 +1020,4 @@ mod test {
         cpu.load_and_run(vec![0xa9, 0b1010_1010, 0x29, 0b0101_0101]);
         assert_eq!(cpu.register_a, 0)
     }
-}
+}*/
