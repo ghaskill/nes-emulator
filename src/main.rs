@@ -2,12 +2,14 @@ pub mod cpu;
 pub mod opcodes;
 pub mod bus;
 pub mod cart;
+pub mod trace;
 
 use cart::Rom;
 use bus::Bus;
 use cpu::Mem;
 use cpu::CPU;
 use rand::Rng;
+use trace::trace;
 
 use sdl2::event::Event;
 use sdl2::EventPump;
@@ -99,15 +101,16 @@ fn main() {
 
     let bus = Bus::new(rom);
     let mut cpu = CPU::new(bus);
-    //cpu.load(game_code);
     cpu.reset();
+    cpu.program_counter = 0xC000;
 
-    let mut screen_state = [0 as u8; 32 * 3 * 32];
-    let mut rng = rand::thread_rng();
+    /* let mut screen_state = [0 as u8; 32 * 3 * 32];
+    let mut rng = rand::thread_rng(); */
 
     // run the game cycle
     cpu.run_with_callback(move |cpu| {
-        handle_user_input(cpu, &mut event_pump);
+        println!("{}", trace(cpu));
+       /* handle_user_input(cpu, &mut event_pump);
 
         cpu.mem_write(0xfe, rng.gen_range(1, 16));
 
@@ -120,6 +123,7 @@ fn main() {
         }
 
         ::std::thread::sleep(std::time::Duration::new(0, 70_000));
+        */
     });
 
 }
