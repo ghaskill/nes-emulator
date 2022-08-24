@@ -613,10 +613,89 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_a);
     }
 
-    pub fn load_and_run(&mut self, program: Vec<u8>) {
-        self.load(program);
-        self.reset();
-        self.run()
+    // ILLEGAL OPCODES
+
+    
+
+
+    /* ANC */
+    fn anc(&mut self, mode: &AddressingMode) {
+        // AND {imm} then set carry flag as if ASL performed
+        self.and(&mode);
+
+        if self.register_a >> 7 == 1 {
+            self.set_carry_flag();
+        } else { 
+            self.clear_carry_flag();
+        }
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    /* ALR */
+    fn alr(&mut self, mode: &AddressingMode) {
+        self.and(&mode);
+        self.lsr_accumulator();
+    }
+
+    /* ARR */
+    fn arr(&mut self, mode: &AddressingMode) {
+        self.and(&mode);
+        let addr: u16 =  self.get_operand_address(&mode);
+        let data: u8 = self.mem_read(addr) & self.register_a;
+        let sum = self.register_a + data;
+
+        if (data ^ sum) & (self.register_a ^ sum) & 0x80 != 0 {
+            self.status.insert(CpuFlags::OVERFLOW);
+        } else {
+            self.status.remove(CpuFlags::OVERFLOW);
+        }
+
+        let carry = sum >> 7 > 0;
+        let vflag: bool = self.status.contains(CpuFlags::CARRY);
+
+        if carry && !vflag {
+            self.mem_write(addr, sum ^ 0b1000_0000);
+            self.status.insert(CpuFlags::CARRY);
+        } else if !carry && vflag {
+            self.mem_write(addr, sum | 0b1000_0000);
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        self.ror_accumulator();
+    } 
+
+    /* DCP */
+    fn dcp(&mut self, mode: &AddressingMode) {
+        self.dec(&mode);
+        let addr = self.get_operand_address(&mode);
+        let data = self.mem_read(addr);
+        self.compare(&mode, data);
+    }
+
+    /* LAX */
+    fn lax(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(&mode);
+        let value = self.mem_read(addr);
+
+        self.register_a = value;
+        self.update_zero_and_negative_flags(self.register_a);
+
+        self.register_x = value;
+        self.update_zero_and_negative_flags(self.register_x);
+
+    }
+
+    /* SAX */
+    fn sax(&mut self, mode: &AddressingMode) {
+        let addr: u16 = self.get_operand_address(&mode);
+        let data:u8 = self.register_a & self.register_x;
+        self.mem_write(addr, data);
+    }
+
+    /* SLO */
+    fn slo(&mut self, mode: &AddressingMode) {
+        self.asl(&mode);
+        self.ora(&mode);
     }
 
     pub fn load(&mut self, program: Vec<u8>) {
@@ -829,12 +908,14 @@ impl CPU {
                 },
 
                 /* NOP */
-                0xea => {
+                0xea | 0x80 | 0xda | 0xfa | 0x89 | 0x8b | 0x04 | 0x44 | 0x64 
+                | 0x14 | 0x34 | 0x54 | 0x74 | 0xd4 | 0xf4 | 0x1a | 0x3a | 0x5a | 0x7a
+                | 0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc => {
                     // do nothing
                 },
 
                 /* ORA */
-                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => {
+                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 | 0x0c => {
                     self.ora(&opcode.mode);
                 },
 
@@ -945,6 +1026,30 @@ impl CPU {
                 },
 
                 0x00 => return,
+
+                /* ILLEGAL OPCODES */
+
+                /* ANC */
+                0x0b => self.anc(&opcode.mode),
+
+                /* AXS */
+                0xcb => {
+                // do nothing
+                },
+                
+                /* DCP */
+                0xd3 | 0xdb => {
+                    self.dcp(&opcode.mode);
+                }
+
+                /* LAX */
+                0xb3 | 0xa7 | 0xa3 | 0xaf | 0xb7 => self.lax(&opcode.mode),
+
+                /* SAX */
+                0x8f => self.sax(&opcode.mode),
+
+                /* SLO */
+                0x07 => self.slo(&opcode.mode),
 
                 _ => todo!(),
             }

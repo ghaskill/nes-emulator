@@ -28,7 +28,8 @@ impl Mem for Bus {
             PPU_REGISTERS ..= PPU_REGISTERS_MIRROR_END => {
                 // PPU registers at 0x2006 and 0x2007
                 let _mirrored_addr = addr & 0b0010_0000_0000_0111;
-                todo!("PPU not implemented yet")
+                //todo!("PPU not implemented yet")
+                0
             }
             CARTRIDGE_ROM_START ..= CARTRIDGE_ROM_END => {
                 self.read_prg_rom(addr)
