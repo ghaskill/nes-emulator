@@ -3,11 +3,13 @@ pub mod opcodes;
 pub mod bus;
 pub mod cart;
 pub mod trace;
+mod control_register;
 
 use cart::Rom;
 use bus::Bus;
 use cpu::Mem;
 use cpu::CPU;
+use cpu::CpuFlags;
 use rand::Rng;
 use trace::trace;
 
@@ -123,7 +125,7 @@ fn main() {
         }
 
         ::std::thread::sleep(std::time::Duration::new(0, 70_000));
-        
+    //println!("{}", cpu.status.contains(CpuFlags::NEGATIVE));
     });
 
 }

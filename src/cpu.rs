@@ -201,6 +201,10 @@ impl CPU {
         self.status.remove(CpuFlags::CARRY);
     }
 
+    fn clear_negative_flag(&mut self) {
+        self.status.remove(CpuFlags::NEGATIVE);
+    }
+
     fn set_register_a(&mut self, data: u8) {
         self.register_a = data;
     }
@@ -212,10 +216,26 @@ impl CPU {
             self.status.remove(CpuFlags::ZERO);
         }
 
-        if result & 0b1000_0000 != 0 {
+        if result >> 7 == 1 {
             self.status.insert(CpuFlags::NEGATIVE);
         } else {
             self.status.remove(CpuFlags::NEGATIVE);
+        }
+    }
+
+    fn update_negative_flag(&mut self, result: u8) {
+        if result >> 7 == 1 {
+            self.status.insert(CpuFlags::NEGATIVE);
+        } else {
+            self.status.remove(CpuFlags::NEGATIVE);
+        }
+    }
+
+    fn update_zero_flag(&mut self, result: u8) {
+        if result == 0 {
+            self.status.insert(CpuFlags::ZERO);
+        } else {
+            self.status.remove(CpuFlags::ZERO);
         }
     }
 
@@ -255,6 +275,7 @@ impl CPU {
         let result = self.mem_read(addr);
 
         self.add_with_carry(result);
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn and(&mut self, mode: &AddressingMode) {
@@ -410,7 +431,7 @@ impl CPU {
         let value = self.mem_read(addr);
 
         self.register_a = value;
-        self.update_zero_and_negative_flags(self.register_a);
+        self.update_zero_and_negative_flags(value);
     }
 
     fn ldx(&mut self, mode: &AddressingMode) {
@@ -437,6 +458,8 @@ impl CPU {
             self.clear_carry_flag();
         }
         data = data >> 1;
+        self.update_zero_flag(data); //
+        self.clear_negative_flag(); //
         self.set_register_a(data)
     }
 
@@ -511,7 +534,7 @@ impl CPU {
             data = data | 1;
         }
         self.mem_write(addr, data);
-        self.update_zero_and_negative_flags(data);
+        self.update_negative_flag(data);
         data
     }
 
@@ -546,7 +569,7 @@ impl CPU {
             data = data | 0b10000000;
         }
         self.mem_write(addr, data);
-        self.update_zero_and_negative_flags(data);
+        self.update_negative_flag(data);
         data
     }
 
@@ -677,12 +700,9 @@ impl CPU {
         let addr = self.get_operand_address(&mode);
         let value = self.mem_read(addr);
 
+        self.update_zero_and_negative_flags(value);
         self.register_a = value;
-        self.update_zero_and_negative_flags(self.register_a);
-
         self.register_x = value;
-        self.update_zero_and_negative_flags(self.register_x);
-
     }
 
     /* SAX */
@@ -773,7 +793,7 @@ impl CPU {
                 0x0a => {
                     self.asl_accumulator();
                 },
-
+                
                 0x06 | 0x16 | 0x0e | 0x1e => {
                     self.asl(&opcode.mode);
                 },
