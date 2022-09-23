@@ -102,7 +102,7 @@ impl CPU {
             register_x: 0,
             register_y: 0,
             status: CpuFlags::from_bits_truncate(0b100100),
-            program_counter: 0,
+            program_counter: 0xFFFC,
             stack_pointer: STACK_RESET,
             bus: bus,
             // memory: [0; 0xFFFF]
@@ -295,6 +295,7 @@ impl CPU {
         }
         data = data << 1;
         self.register_a = data;
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn asl(&mut self, mode: &AddressingMode) {
@@ -334,7 +335,7 @@ impl CPU {
             self.status.remove(CpuFlags::ZERO);
         }
 
-        self.status.set(CpuFlags::NEGATIVE, data & 0b1000_0000 > 0);
+        self.update_negative_flag(data);
         self.status.set(CpuFlags::OVERFLOW, data & 0b0100_0000 > 0);
     }
 
@@ -375,6 +376,7 @@ impl CPU {
         let data = self.mem_read(addr);
 
         self.set_register_a(data ^ self.register_a);
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn inc(&mut self, mode: &AddressingMode) {
@@ -403,7 +405,7 @@ impl CPU {
 
     fn jump_indirect(&mut self) {
         let mem_address = self.mem_read_u16(self.program_counter);
-        // let indirect_ref = self.mem_read_u16(mem_address);
+        let indirect_ref = self.mem_read_u16(mem_address);
         //6502 bug mode with with page boundary:
         //  if address $3000 contains $40, $30FF contains $80, and $3100 contains $50,
         // the result of JMP ($30FF) will be a transfer of control to $4080 rather than $5080 as you intended
@@ -431,7 +433,7 @@ impl CPU {
         let value = self.mem_read(addr);
 
         self.register_a = value;
-        self.update_zero_and_negative_flags(value);
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn ldx(&mut self, mode: &AddressingMode) {
@@ -482,6 +484,7 @@ impl CPU {
         let data = self.mem_read(addr);
 
         self.set_register_a(data | self.register_a);
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn php(&mut self) {
@@ -495,6 +498,7 @@ impl CPU {
     fn pla(&mut self) {
         let data = self.stack_pop();
         self.set_register_a(data);
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn plp(&mut self) {
@@ -517,6 +521,7 @@ impl CPU {
             data = data | 1;
         }
         self.set_register_a(data);
+        self.update_negative_flag(self.register_a);
     }
 
     fn rol(&mut self, mode: &AddressingMode) -> u8 {
@@ -550,8 +555,13 @@ impl CPU {
         data = data >> 1;
         if old_carry {
             data = data | 0b10000000;
+            self.status.insert(CpuFlags::NEGATIVE);
+        } else {
+            self.status.remove(CpuFlags::NEGATIVE);
         }
         self.set_register_a(data);
+        self.update_zero_flag(self.register_a);
+
     }
 
     fn ror(&mut self, mode: &AddressingMode) -> u8 {
@@ -569,7 +579,13 @@ impl CPU {
             data = data | 0b10000000;
         }
         self.mem_write(addr, data);
-        self.update_negative_flag(data);
+        self.update_zero_flag(data);
+
+        if old_carry {
+            self.status.insert(CpuFlags::NEGATIVE);
+        } else {
+            self.status.remove(CpuFlags::NEGATIVE)
+        }
         data
     }
 
@@ -590,6 +606,7 @@ impl CPU {
         let data = self.mem_read(addr);
 
         self.add_with_carry(((data as i8).wrapping_neg().wrapping_sub(1)) as u8);
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn sta(&mut self, mode: &AddressingMode) {
@@ -638,9 +655,6 @@ impl CPU {
 
     // ILLEGAL OPCODES
 
-    
-
-
     /* ANC */
     fn anc(&mut self, mode: &AddressingMode) {
         // AND {imm} then set carry flag as if ASL performed
@@ -655,7 +669,7 @@ impl CPU {
     }
 
     /* ALR */
-    fn alr(&mut self, mode: &AddressingMode) {
+    fn asr(&mut self, mode: &AddressingMode) {
         self.and(&mode);
         self.lsr_accumulator();
     }
@@ -687,14 +701,37 @@ impl CPU {
         self.ror_accumulator();
     } 
 
+    /* AXS */
+    fn axs(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(&mode);
+        let data = self.mem_read(addr);
+        let and = self.register_a & self.register_x;
+
+        // Get 2's complement of data
+        let complement_data = (data ^ 0b1111_1111) + 1;
+        let difference = and + complement_data;
+
+        if and >= complement_data {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        self.register_x = difference;
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
     /* DCP */
     fn dcp(&mut self, mode: &AddressingMode) {
         self.dec(&mode);
-        let addr = self.get_operand_address(&mode);
-        let data = self.mem_read(addr);
-        self.compare(&mode, data);
+        self.compare(&mode, self.register_a);
     }
 
+    /* ISB */
+    fn isb(&mut self, mode: &AddressingMode) {
+        self.inc(&mode);
+        self.sbc(&mode);
+    }
     /* LAX */
     fn lax(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(&mode);
@@ -703,6 +740,18 @@ impl CPU {
         self.update_zero_and_negative_flags(value);
         self.register_a = value;
         self.register_x = value;
+    }
+
+    /* RLA */
+    fn rla(&mut self, mode: &AddressingMode) {
+        self.rol(&mode);
+        self.and(&mode);
+    }
+
+    /* RRA */
+    fn rra(&mut self, mode: &AddressingMode) {
+        self.ror(&mode);
+        self.adc(&mode);
     }
 
     /* SAX */
@@ -716,6 +765,12 @@ impl CPU {
     fn slo(&mut self, mode: &AddressingMode) {
         self.asl(&mode);
         self.ora(&mode);
+    }
+
+    /* SRE */
+    fn sre(&mut self, mode: &AddressingMode) {
+        self.lsr(&mode);
+        self.eor(&mode);
     }
 
     pub fn load(&mut self, program: Vec<u8>) {
@@ -930,12 +985,12 @@ impl CPU {
                 /* NOP */
                 0xea | 0x80 | 0xda | 0xfa | 0x89 | 0x8b | 0x04 | 0x44 | 0x64 
                 | 0x14 | 0x34 | 0x54 | 0x74 | 0xd4 | 0xf4 | 0x1a | 0x3a | 0x5a | 0x7a
-                | 0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc => {
+                | 0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc | 0x0c => {
                     // do nothing
                 },
 
                 /* ORA */
-                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 | 0x0c => {
+                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => {
                     self.ora(&opcode.mode);
                 },
 
@@ -981,13 +1036,13 @@ impl CPU {
                 },
 
                 /* SBC */
-                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
+                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 | 0xeb => {
                     self.sbc(&opcode.mode);
                 },
 
                 /* SEC */
                 0x38 => {
-                    self.set_carry_flag();
+                    self.status.insert(CpuFlags::CARRY);
                 },
 
                 /* SED */
@@ -1052,24 +1107,37 @@ impl CPU {
                 /* ANC */
                 0x0b => self.anc(&opcode.mode),
 
+                /* ASR */
+                0x4b => self.asr(&opcode.mode),
+
                 /* AXS */
-                0xcb => {
-                // do nothing
-                },
+                0xcb => self.axs(&opcode.mode),
                 
                 /* DCP */
-                0xd3 | 0xdb => {
+                0xd3 | 0xdb | 0xcf | 0xdf | 0xc7 | 0xd7 | 0xc3 => {
                     self.dcp(&opcode.mode);
                 }
 
+                /* ISB */
+                0xef | 0xff | 0xfb | 0xe7 | 0xf7 | 0xe3 | 0xf3 => self.isb(&opcode.mode),
+
                 /* LAX */
-                0xb3 | 0xa7 | 0xa3 | 0xaf | 0xb7 => self.lax(&opcode.mode),
+                0xb3 | 0xa7 | 0xa3 | 0xaf | 0xb7 | 0xbf => self.lax(&opcode.mode),
+                
+                /* RLA */
+                0x2f | 0x3f | 0x3b | 0x27 | 0x37 | 0x23 | 0x33 => self.rla(&opcode.mode),
+
+                /* RRA */
+                0x6f | 0x7f | 0x7b | 0x67 | 0x77 | 0x63 | 0x73 => self.rra(&opcode.mode),
 
                 /* SAX */
-                0x8f => self.sax(&opcode.mode),
+                0x8f | 0x83 | 0x97 | 0x87 => self.sax(&opcode.mode),
 
                 /* SLO */
-                0x07 => self.slo(&opcode.mode),
+                0x07 | 0x0f | 0x1f | 0x1b | 0x17 | 0x03 | 0x13 => self.slo(&opcode.mode),
+
+                /* SRE */
+                0x4f | 0x5f | 0x5b | 0x47 | 0x57 | 0x43 | 0x53 => self.sre(&opcode.mode),
 
                 _ => todo!(),
             }
