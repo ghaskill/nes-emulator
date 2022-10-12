@@ -4,8 +4,9 @@ use crate::cpu::AddressingMode;
 use crate::opcodes;
 use crate::cart::test::test_rom;
 use std::collections::HashMap;
+use crate::ppu::MyPPU;
 
-pub fn trace(cpu: &CPU) -> String {
+pub fn trace(cpu: &mut CPU) -> String {
     let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
 
     let code = cpu.mem_read(cpu.program_counter);
@@ -21,7 +22,7 @@ pub fn trace(cpu: &CPU) -> String {
         }
 
         _ => {
-            let addr = cpu.get_stored_value_address(&ops.mode, origin + 1);
+            let (addr, _) = cpu.get_stored_value_address(&ops.mode, origin + 1);
             (addr, cpu.mem_read(addr))
         }
     };
@@ -142,7 +143,7 @@ mod test {
 
     #[test]
     fn test_format_trace() {
-        let mut bus = Bus::new(test_rom());
+        let mut bus = Bus::new(test_rom(), |ppu: &MyPPU| {});
         bus.mem_write(100, 0xa2);
         bus.mem_write(101, 0x01);
         bus.mem_write(102, 0xca);

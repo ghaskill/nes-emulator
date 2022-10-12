@@ -1,24 +1,29 @@
-pub mod cpu;
-pub mod opcodes;
 pub mod bus;
 pub mod cart;
+pub mod cpu;
+pub mod opcodes;
 pub mod trace;
-mod control_register;
+pub mod ppu;
+pub mod graphics_data;
+pub mod controller;
 
-use cart::Rom;
 use bus::Bus;
+use cart::Rom;
 use cpu::Mem;
 use cpu::CPU;
-use cpu::CpuFlags;
-use rand::Rng;
 use trace::trace;
+use graphics_data::frame::Frame;
+use graphics_data::palette;
+use ppu::MyPPU;
+// use rand::Rng;
 
 use sdl2::event::Event;
-use sdl2::EventPump;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::pixels::PixelFormatEnum;
-use std::time::Duration;
+use sdl2::EventPump;
+
+use std::collections::HashMap;
 
 #[macro_use]
 extern crate lazy_static;
@@ -40,7 +45,7 @@ fn color(byte: u8) -> Color {
     }
 }
 
-fn read_screen_state(cpu: &CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
+fn read_screen_state(cpu: &mut CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
     let mut frame_idx = 0;
     let mut update = false;
     for i in 0x0200..0x600 {
@@ -60,72 +65,113 @@ fn read_screen_state(cpu: &CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
 fn handle_user_input(cpu: &mut CPU, event_pump: &mut EventPump) {
     for event in event_pump.poll_iter() {
         match event {
-            Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                std::process::exit(0)
-            },
-            Event::KeyDown { keycode: Some(Keycode::W), .. } => {
+            Event::Quit { .. }
+            | Event::KeyDown {
+                keycode: Some(Keycode::Escape),
+                ..
+            } => std::process::exit(0),
+            Event::KeyDown {
+                keycode: Some(Keycode::W),
+                ..
+            } => {
                 cpu.mem_write(0xff, 0x77);
-            },
-            Event::KeyDown { keycode: Some(Keycode::S), .. } => {
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::S),
+                ..
+            } => {
                 cpu.mem_write(0xff, 0x73);
-            },
-            Event::KeyDown { keycode: Some(Keycode::A), .. } => {
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::A),
+                ..
+            } => {
                 cpu.mem_write(0xff, 0x61);
-            },
-            Event::KeyDown { keycode: Some(Keycode::D), .. } => {
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::D),
+                ..
+            } => {
                 cpu.mem_write(0xff, 0x64);
             }
-            _ => {/* do nothing */}
+            _ => { /* do nothing */ }
         }
     }
 }
+
 
 fn main() {
     // init sdl2
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
     let window = video_subsystem
-        .window("test", (32.0 * 10.0) as u32, (32.0 * 10.0) as u32)
+        .window("Tile viewer", (256.0 * 3.0) as u32, (240.0 * 3.0) as u32)
         .position_centered()
-        .build().unwrap();
+        .build()
+        .unwrap();
 
     let mut canvas = window.into_canvas().present_vsync().build().unwrap();
     let mut event_pump = sdl_context.event_pump().unwrap();
-    canvas.set_scale(10.0, 10.0).unwrap();
+    canvas.set_scale(3.0, 3.0).unwrap();
 
     let creator = canvas.texture_creator();
     let mut texture = creator
-        .create_texture_target(PixelFormatEnum::RGB24, 32, 32).unwrap();
+        .create_texture_target(PixelFormatEnum::RGB24, 256, 240)
+        .unwrap();
 
     //load the game
-    let bytes: Vec<u8> = std::fs::read("nestest.nes").unwrap();
+    let bytes: Vec<u8> = std::fs::read("Pac-Man (USA) (Tengen).nes").unwrap();
     let rom = Rom::new(&bytes).unwrap();
 
-    let bus = Bus::new(rom);
-    let mut cpu = CPU::new(bus);
-    cpu.reset();
-    cpu.program_counter = 0xC000;
-
-    let mut screen_state = [0 as u8; 32 * 3 * 32];
-    let mut rng = rand::thread_rng();
+    let mut frame = Frame::new();
 
     // run the game cycle
-    cpu.run_with_callback(move |cpu| {
-        println!("{}", trace(cpu));
-        handle_user_input(cpu, &mut event_pump);
+    let mut key_map = HashMap::new();
+   key_map.insert(Keycode::Down, controller::JoypadButton::DOWN);
+   key_map.insert(Keycode::Up, controller::JoypadButton::UP);
+   key_map.insert(Keycode::Right, controller::JoypadButton::RIGHT);
+   key_map.insert(Keycode::Left, controller::JoypadButton::LEFT);
+   key_map.insert(Keycode::Space, controller::JoypadButton::SELECT);
+   key_map.insert(Keycode::Return, controller::JoypadButton::START);
+   key_map.insert(Keycode::A, controller::JoypadButton::BUTTON_A);
+   key_map.insert(Keycode::S, controller::JoypadButton::BUTTON_B);
 
-        cpu.mem_write(0xfe, rng.gen_range(1, 16));
 
-        if read_screen_state(cpu, &mut screen_state) {
-            texture.update(None, &screen_state, 32 * 3).unwrap();
+   // run the game cycle
+   let bus = Bus::new(rom, move |ppu: &MyPPU, joypad: &mut controller::Joypad| {
+       graphics_data::render(ppu, &mut frame);
+       texture.update(None, &frame.data, 256 * 3).unwrap();
 
-            canvas.copy(&texture, None, None).unwrap();
+       canvas.copy(&texture, None, None).unwrap();
 
-            canvas.present();
-        }
+       canvas.present();
+       for event in event_pump.poll_iter() {
+           match event {
+               Event::Quit { .. }
+               | Event::KeyDown {
+                   keycode: Some(Keycode::Escape),
+                   ..
+               } => std::process::exit(0),
 
-        ::std::thread::sleep(std::time::Duration::new(0, 70_000));
-    //println!("{}", cpu.status.contains(CpuFlags::NEGATIVE));
-    });
 
-}
+               Event::KeyDown { keycode, .. } => {
+                   if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                       joypad.set_button_pressed_status(*key, true);
+                   }
+               }
+               Event::KeyUp { keycode, .. } => {
+                   if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                       joypad.set_button_pressed_status(*key, false);
+                   }
+               }
+
+               _ => { /* do nothing */ }
+           }
+       }
+   });
+
+    let mut cpu = CPU::new(bus);
+
+    cpu.reset();
+    cpu.run();
+}  
